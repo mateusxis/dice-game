@@ -1,7 +1,7 @@
 # Cassino — Dice Betting Engine
 
-A backend for a two-dice, even/odd betting game, built as a technical test
-for Vertsa Play. Players register, deposit funds, sit at rooms of up to 6,
+A backend for a two-dice, even/odd betting game, built as a technical test. 
+Players register, deposit funds, sit at rooms of up to 6,
 and bet even/odd on the sum of two dice across up to 10 timed rounds per
 room. A winning bet pays **1.92×** the stake (an exact **0.96 RTP**). Built
 in Go with PostgreSQL (source of truth) and Redis (cache + coordination),
@@ -219,6 +219,12 @@ Dockerfile                    multi-stage build
 Makefile                      convenience wrappers over the commands above
 .env.example                  copy to .env and adjust
 ```
+
+## Future updates
+
+- A frontend with animations for rounds and rooms;
+- Support for multiple languages in the frontend;
+- Support for multiple currencies.
 
 ## Notes on this technical test
 
