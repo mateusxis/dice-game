@@ -1,0 +1,73 @@
+name: cassino
+
+# Requires a .env file in this directory: `make env` (or `cp .env.example .env`)
+# creates one. JWT_SECRET is deliberately mandatory rather than defaulted, so a
+# deployment can never start with a well-known signing key.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cassino-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cassino}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cassino}
+      POSTGRES_DB: ${POSTGRES_DB:-cassino}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # The API waits for this before running its embedded migrations.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cassino} -d ${POSTGRES_DB:-cassino}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: cassino-redis
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+    container_name: cassino-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      HTTP_PORT: "8080"
+      # Inside the compose network the services are reachable by service name,
+      # so these override whatever .env holds for local (host) runs.
+      DATABASE_URL: postgres://${POSTGRES_USER:-cassino}:${POSTGRES_PASSWORD:-cassino}@postgres:5432/${POSTGRES_DB:-cassino}?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set - copy .env.example to .env}
+      JWT_TTL: ${JWT_TTL:-24h}
+      BETTING_WINDOW: ${BETTING_WINDOW:-15s}
+      BCRYPT_COST: ${BCRYPT_COST:-12}
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
