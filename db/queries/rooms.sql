@@ -71,3 +71,11 @@ WHERE rp.player_id = $1
   AND r.status <> 'closed'
 ORDER BY rp.joined_at DESC
 LIMIT 1;
+
+-- name: ListActiveRoomIDs :many
+-- Crash recovery: every room a previous process left behind (not closed), so
+-- the new process can refund open bets and close them.
+SELECT id
+FROM rooms
+WHERE status <> 'closed'
+ORDER BY created_at ASC;

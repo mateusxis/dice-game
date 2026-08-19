@@ -40,6 +40,9 @@ type Querier interface {
 	// against two concurrent requests from the same player.
 	InsertBet(ctx context.Context, arg InsertBetParams) (Bet, error)
 	InsertTransaction(ctx context.Context, arg InsertTransactionParams) (Transaction, error)
+	// Crash recovery: every room a previous process left behind (not closed), so
+	// the new process can refund open bets and close them.
+	ListActiveRoomIDs(ctx context.Context) ([]pgtype.UUID, error)
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
 	ListAuditLogsByActor(ctx context.Context, arg ListAuditLogsByActorParams) ([]AuditLog, error)
 	ListBetsByPlayer(ctx context.Context, arg ListBetsByPlayerParams) ([]Bet, error)

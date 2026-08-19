@@ -21,11 +21,14 @@ type testDeps struct {
 	ids          *fakeIDGen
 	tokens       *fakeTokenService
 	auditRepo    *fakeAuditRepo
+	roomCreator  *stubRoomCreator
+	roomLister   *stubRoomLister
+	roomCloser   *stubRoomCloser
 }
 
-// newTestRouter wires a full router — auth, wallet, JWT middleware, audit
-// middleware — entirely against in-memory fakes; no network or database I/O
-// happens anywhere in these tests.
+// newTestRouter wires a full router — auth, wallet, rooms, JWT middleware,
+// audit middleware — entirely against in-memory fakes; no network or database
+// I/O happens anywhere in these tests.
 func newTestRouter(t *testing.T) (*chi.Mux, *testDeps) {
 	t.Helper()
 
@@ -37,6 +40,9 @@ func newTestRouter(t *testing.T) (*chi.Mux, *testDeps) {
 		ids:          &fakeIDGen{},
 		tokens:       newFakeTokenService(),
 		auditRepo:    &fakeAuditRepo{},
+		roomCreator:  &stubRoomCreator{},
+		roomLister:   &stubRoomLister{},
+		roomCloser:   &stubRoomCloser{},
 	}
 
 	clk := fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
@@ -56,10 +62,15 @@ func newTestRouter(t *testing.T) (*chi.Mux, *testDeps) {
 		DepositUseCase:  depositUC,
 		WithdrawUseCase: withdrawUC,
 		BalanceUseCase:  balanceUC,
-		Tokens:          deps.tokens,
-		AuditRepo:       deps.auditRepo,
-		Clock:           clk,
-		IDs:             deps.ids,
+
+		CreateRoom: deps.roomCreator,
+		ListRooms:  deps.roomLister,
+		CloseRoom:  deps.roomCloser,
+
+		Tokens:    deps.tokens,
+		AuditRepo: deps.auditRepo,
+		Clock:     clk,
+		IDs:       deps.ids,
 	})
 
 	return router, deps
