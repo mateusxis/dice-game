@@ -1,0 +1,18 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "db/migrations"
+    queries: "db/queries"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/infrastructure/postgres/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: false
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_empty_slices: true
+        # No type overrides: generated code sticks to pgx's own pgtype values
+        # (pgtype.UUID, pgtype.Timestamptz, ...). The repository layer in
+        # internal/infrastructure/postgres converts them to/from plain domain
+        # types, so the pgtype vocabulary never leaks past that package.

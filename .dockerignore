@@ -1,0 +1,24 @@
+# Keep the build context small and free of anything secret.
+.git
+.gitignore
+.env
+.env.local
+bin/
+coverage.out
+coverage.html
+*.test
+
+# Not needed inside the image (migrations are embedded in the binary).
+bruno/
+docs/
+api/
+*.pdf
+*.md
+
+.idea/
+.vscode/
+.DS_Store
+
+Dockerfile
+docker-compose.yml
+Makefile
