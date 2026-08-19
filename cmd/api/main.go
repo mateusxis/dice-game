@@ -18,6 +18,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	goredis "github.com/redis/go-redis/v9"
 
+	authapp "github.com/mateusxis/cassino/internal/application/auth"
+	walletapp "github.com/mateusxis/cassino/internal/application/wallet"
+	"github.com/mateusxis/cassino/internal/infrastructure/auth"
+	"github.com/mateusxis/cassino/internal/infrastructure/clock"
 	"github.com/mateusxis/cassino/internal/infrastructure/config"
 	"github.com/mateusxis/cassino/internal/infrastructure/postgres"
 	redisinfra "github.com/mateusxis/cassino/internal/infrastructure/redis"
@@ -73,6 +77,26 @@ func run() error {
 	defer func() { _ = redisClient.Close() }()
 	logger.Info("connected to redis")
 
+	// --- adapters ------------------------------------------------------
+	sysClock := clock.NewSystem()
+	ids := auth.NewUUIDGenerator()
+	hasher := auth.NewBcryptHasher(cfg.BcryptCost)
+	tokens := auth.NewJWTService(cfg.JWTSecret, cfg.JWTTTL)
+
+	txManager := postgres.NewTxManager(pool)
+	playerRepo := postgres.NewPlayerRepository(pool)
+	transactionRepo := postgres.NewTransactionRepository(pool)
+	roomRepo := postgres.NewRoomRepository(pool)
+	auditRepo := postgres.NewAuditRepository(pool)
+	sessionStore := redisinfra.NewPlayerSessionStore(redisClient)
+
+	// --- use cases -------------------------------------------------------
+	registerUC := authapp.NewRegisterUseCase(playerRepo, hasher, ids, sysClock)
+	loginUC := authapp.NewLoginUseCase(playerRepo, hasher, tokens)
+	depositUC := walletapp.NewDepositUseCase(txManager, playerRepo, transactionRepo, ids, sysClock)
+	withdrawUC := walletapp.NewWithdrawUseCase(txManager, playerRepo, transactionRepo, roomRepo, sessionStore, ids, sysClock)
+	balanceUC := walletapp.NewGetBalanceUseCase(playerRepo)
+
 	router := rest.NewRouter(rest.RouterOptions{
 		Version:        version,
 		RequestTimeout: 30 * time.Second,
@@ -80,6 +104,18 @@ func run() error {
 			{Name: "postgres", Check: pingPostgres(pool)},
 			{Name: "redis", Check: pingRedis(redisClient)},
 		},
+
+		RegisterUseCase: registerUC,
+		LoginUseCase:    loginUC,
+		DepositUseCase:  depositUC,
+		WithdrawUseCase: withdrawUC,
+		BalanceUseCase:  balanceUC,
+		Tokens:          tokens,
+
+		AuditRepo: auditRepo,
+		Clock:     sysClock,
+		IDs:       ids,
+		Logger:    logger,
 	})
 
 	server := &http.Server{
