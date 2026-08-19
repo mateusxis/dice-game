@@ -1,0 +1,44 @@
+meta {
+  name: Deposit
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/wallet/deposit
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "amount": 10000
+  }
+}
+
+docs {
+  # Deposit
+
+  Credits `{{token}}`'s account (Player 1 by default — switch the Bearer
+  token to `{{token2}}` to deposit for Player 2). `amount` is cents,
+  strictly positive.
+
+  Deposits are allowed at any time, including while seated in a room.
+
+  **Expected success**: `200` with `{balance}` — the balance after this
+  deposit.
+
+  **Expected errors**:
+  - `400 invalid_request` — amount is zero, negative, or the body is
+    malformed.
+  - `401 unauthorized` — missing/invalid/expired bearer token. Run "Login
+    Player 1" first.
+}

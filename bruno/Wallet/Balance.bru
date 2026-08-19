@@ -1,0 +1,28 @@
+meta {
+  name: Balance
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/wallet/balance
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+docs {
+  # Balance
+
+  Reads `{{token}}`'s current balance. Also obtainable over WebSocket via
+  `room.state`/`balance.updated` while seated in a room — see
+  `docs/WS_EVENTS.md`.
+
+  **Expected success**: `200` with `{balance}`.
+
+  **Expected errors**:
+  - `401 unauthorized` — missing/invalid/expired bearer token.
+}

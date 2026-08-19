@@ -1,6 +1,5 @@
 # Binaries
 bin/
-/api
 *.exe
 
 # Test and coverage output

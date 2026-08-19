@@ -1,0 +1,41 @@
+meta {
+  name: Create Room
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/rooms
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    bru.setEnvVar("roomId", res.getBody().id);
+  }
+}
+
+docs {
+  # Create Room
+
+  The caller (Player 1 by default) becomes the room's owner and its first
+  seated player. Captures the new room's id into `roomId` for the WS
+  requests and for "Close Room" below.
+
+  A player may be seated in at most one room at a time — this call also
+  blocks that player's withdrawals until the room closes.
+
+  **Expected success**: `201` with the room summary
+  `{id, owner_id, status: "open", current_round: 0, max_rounds: 10,
+  player_count: 1, max_players: 6, created_at}`.
+
+  **Expected errors**:
+  - `401 unauthorized` — missing/invalid/expired bearer token.
+  - `409 already_in_another_room` — this player already owns/joined a room
+    that hasn't closed. Close it first (or use the other player's token).
+}

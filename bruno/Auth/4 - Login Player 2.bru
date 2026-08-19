@@ -1,0 +1,35 @@
+meta {
+  name: 4 - Login Player 2
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/auth/login
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "email": "{{email2}}",
+    "password": "{{password2}}"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.setEnvVar("token2", res.getBody().token);
+  }
+}
+
+docs {
+  # Login Player 2
+
+  Same as "3 - Login Player 1", captures into `token2` instead so both
+  players' credentials are available side by side for the WS walkthrough.
+}

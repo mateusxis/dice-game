@@ -1,0 +1,42 @@
+meta {
+  name: 3 - Login Player 1
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/auth/login
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "email": "{{email}}",
+    "password": "{{password}}"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.setEnvVar("token", res.getBody().token);
+  }
+}
+
+docs {
+  # Login Player 1
+
+  Open endpoint. Exchanges e-mail/password for a JWT.
+
+  **Expected success**: `200` with `{token, expires_at}`. The post-response
+  script captures `token` into the `token` environment variable, which every
+  authenticated request in this collection reads via its Bearer Auth tab.
+
+  **Expected errors**:
+  - `400 invalid_request` — malformed body.
+  - `401 invalid_credentials` — wrong e-mail or password.
+}
