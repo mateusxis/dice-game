@@ -1,0 +1,22 @@
+# Binaries
+bin/
+*.exe
+
+# Test and coverage output
+coverage.out
+coverage.html
+*.test
+
+# Local environment — .env holds real secrets; only .env.example is committed
+.env
+.env.local
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Go workspace files
+go.work
+go.work.sum
