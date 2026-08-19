@@ -56,7 +56,9 @@ services:
       HTTP_PORT: "8080"
       # Inside the compose network the services are reachable by service name,
       # so these override whatever .env holds for local (host) runs.
-      DATABASE_URL: postgres://${POSTGRES_USER:-cassino}:${POSTGRES_PASSWORD:-cassino}@postgres:5432/${POSTGRES_DB:-cassino}?sslmode=disable
+      # POSTGRES_PASSWORD_URLENC is the percent-encoded form of
+      # POSTGRES_PASSWORD — required because the password is embedded in a URL.
+      DATABASE_URL: postgres://${POSTGRES_USER:-cassino}:${POSTGRES_PASSWORD_URLENC:-cassino}@postgres:5432/${POSTGRES_DB:-cassino}?sslmode=disable
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DB: ${REDIS_DB:-0}
