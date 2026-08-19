@@ -147,6 +147,35 @@ func (q *Queries) GetRoomForUpdate(ctx context.Context, id pgtype.UUID) (Room, e
 	return i, err
 }
 
+const listActiveRoomIDs = `-- name: ListActiveRoomIDs :many
+SELECT id
+FROM rooms
+WHERE status <> 'closed'
+ORDER BY created_at ASC
+`
+
+// Crash recovery: every room a previous process left behind (not closed), so
+// the new process can refund open bets and close them.
+func (q *Queries) ListActiveRoomIDs(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveRoomIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenRooms = `-- name: ListOpenRooms :many
 SELECT r.id,
        r.owner_id,

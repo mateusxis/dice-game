@@ -17,7 +17,10 @@ type RoomRepository struct {
 	pool *pgxpool.Pool
 }
 
-var _ ports.RoomRepository = (*RoomRepository)(nil)
+var (
+	_ ports.RoomRepository         = (*RoomRepository)(nil)
+	_ ports.RoomRecoveryRepository = (*RoomRepository)(nil)
+)
 
 // NewRoomRepository builds a room repository over a pool.
 func NewRoomRepository(pool *pgxpool.Pool) *RoomRepository {
@@ -126,6 +129,21 @@ func (r *RoomRepository) ListOpen(ctx context.Context, limit, offset int32) ([]p
 			MaxPlayers:   int(row.MaxPlayers),
 			CreatedAt:    fromTimestamptz(row.CreatedAt),
 		})
+	}
+	return out, nil
+}
+
+// ListActiveRoomIDs returns every non-closed room, oldest first. Only the
+// startup recovery pass uses it: rooms still marked open or closing after a
+// restart belong to a process that is gone.
+func (r *RoomRepository) ListActiveRoomIDs(ctx context.Context) ([]string, error) {
+	rows, err := querier(ctx, r.pool).ListActiveRoomIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list active rooms: %w", err)
+	}
+	out := make([]string, 0, len(rows))
+	for _, id := range rows {
+		out = append(out, fromUUID(id))
 	}
 	return out, nil
 }

@@ -328,3 +328,30 @@ func TestRoomSettleRoundGuards(t *testing.T) {
 	_, err = room.SettleRoundWithDice(1, 1, baseTime.Add(time.Minute))
 	assert.ErrorIs(t, err, game.ErrRoundAlreadySettled)
 }
+
+func TestRoomAttachRound(t *testing.T) {
+	t.Parallel()
+
+	// Repositories rehydrate a room and its round separately; AttachRound is
+	// how the application layer puts them back together.
+	room := newTestRoom(t)
+	round, err := game.NewRound("round-1", room.ID, 1, baseTime, game.DefaultBettingWindow)
+	require.NoError(t, err)
+
+	room.AttachRound(round)
+	assert.Same(t, round, room.CurrentRoundRef())
+
+	bet, err := game.NewBet("bet-1", "round-1", room.OwnerID, game.ChoiceEven, 100, baseTime)
+	require.NoError(t, err)
+	require.NoError(t, room.PlaceBet(bet, baseTime), "the attached round accepts bets")
+
+	// A settled round is not "live": attaching it clears the pointer, so the
+	// room reports no active round instead of accepting a late bet.
+	_, err = round.SettleWithDice(1, 1, baseTime.Add(game.DefaultBettingWindow))
+	require.NoError(t, err)
+	room.AttachRound(round)
+	assert.Nil(t, room.CurrentRoundRef())
+
+	room.AttachRound(nil)
+	assert.Nil(t, room.CurrentRoundRef())
+}

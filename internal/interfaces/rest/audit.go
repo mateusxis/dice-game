@@ -31,6 +31,9 @@ var auditActions = map[string]string{
 	"POST /wallet/deposit":  "wallet.deposit",
 	"POST /wallet/withdraw": "wallet.withdraw",
 	"GET /wallet/balance":   "wallet.balance",
+	"POST /rooms":           "room.create",
+	"GET /rooms":            "room.list",
+	"DELETE /rooms/{id}":    "room.close",
 }
 
 // auditCtxKey is the context key for the *auditRecorder attached to a
@@ -224,6 +227,12 @@ func routePattern(r *http.Request) string {
 	}
 	return r.URL.Path
 }
+
+// RedactPayload applies this API's redaction policy to a raw JSON body and
+// returns what may be persisted in the audit trail. It is exported so the
+// WebSocket audit writer shares exactly one policy with the REST middleware
+// instead of drifting into a second, subtly different one.
+func RedactPayload(raw []byte) json.RawMessage { return redactPayload(raw) }
 
 // redactPayload parses raw as JSON and blanks out any object key containing
 // "password" (case-insensitive), at any nesting depth. Non-JSON or empty

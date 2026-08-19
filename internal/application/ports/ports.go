@@ -95,6 +95,16 @@ type RoomRepository interface {
 	FindActiveRoomForPlayer(ctx context.Context, playerID string) (string, error)
 }
 
+// RoomRecoveryRepository lists the rooms a previous process left behind. It is
+// deliberately a separate, tiny port: only the startup recovery pass needs it,
+// and keeping it out of RoomRepository means nothing else has to know that
+// crash recovery exists.
+type RoomRecoveryRepository interface {
+	// ListActiveRoomIDs returns the ids of every room that is not closed,
+	// oldest first.
+	ListActiveRoomIDs(ctx context.Context) ([]string, error)
+}
+
 // RoundRepository persists rounds.
 type RoundRepository interface {
 	Create(ctx context.Context, r *game.Round) error

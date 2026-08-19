@@ -150,6 +150,20 @@ func (r *Room) Active() bool { return r.Status != RoomClosed }
 // CurrentRoundRef returns the live round, or nil when none is in progress.
 func (r *Room) CurrentRoundRef() *Round { return r.round }
 
+// AttachRound re-attaches a round loaded from storage to a room loaded from
+// storage. Repositories rehydrate the two aggregates separately (a room row
+// plus its seats, a round row plus its bets), so the application layer uses
+// this to reassemble them before driving the lifecycle — Join/StartRound/
+// PlaceBet/SettleRound all reason about r.round. Passing a settled round, or
+// nil, clears the live round.
+func (r *Room) AttachRound(round *Round) {
+	if round == nil || round.Status == RoundSettled {
+		r.round = nil
+		return
+	}
+	r.round = round
+}
+
 // Join seats a player. It rejects a closed or closing room, a full room and a
 // duplicate join. The 6-seat cap is also guarded outside the aggregate by a
 // Redis lock plus the room_players primary key, since concurrent joins from
