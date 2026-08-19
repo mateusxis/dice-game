@@ -1,0 +1,33 @@
+meta {
+  name: List Rooms
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/rooms?limit=50&offset=0
+  body: none
+  auth: bearer
+}
+
+params:query {
+  limit: 50
+  offset: 0
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+docs {
+  # List Rooms
+
+  Rooms currently accepting players (`status: "open"`), newest first.
+  `source` in the response tells you whether Redis (`"cache"`) or
+  PostgreSQL (`"database"`) answered.
+
+  **Expected success**: `200` with `{rooms: [...], source}`.
+
+  **Expected errors**:
+  - `401 unauthorized` — missing/invalid/expired bearer token.
+}

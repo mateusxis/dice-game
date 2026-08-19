@@ -1,0 +1,44 @@
+meta {
+  name: Withdraw
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/wallet/withdraw
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "amount": 2000
+  }
+}
+
+docs {
+  # Withdraw
+
+  Debits `{{token}}`'s account. `amount` is cents, strictly positive, and
+  capped at the current balance.
+
+  **Expected success**: `200` with `{balance}` — the balance after this
+  withdrawal.
+
+  **Expected errors**:
+  - `400 invalid_request` — amount is zero, negative, or the body is
+    malformed.
+  - `401 unauthorized` — missing/invalid/expired bearer token.
+  - `409 insufficient_balance` — the balance can't cover this amount.
+  - `409 withdrawal_blocked` — the player is currently seated in a room
+    that has not closed yet. To see this: create a room (Rooms/Create Room)
+    with this player, then retry this request before closing it.
+}

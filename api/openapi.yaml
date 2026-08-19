@@ -1,0 +1,629 @@
+openapi: 3.1.0
+info:
+  title: Cassino Dice Betting API
+  version: "1.0.0"
+  description: |
+    REST API for the Cassino dice betting engine (Vertsa Play technical test).
+
+    Two dice are rolled per round; players bet on the sum being **even** or
+    **odd**. A winning bet pays **1.92×** the stake, giving an exact **0.96
+    Return To Player**. See `docs/GAME_RULES.md` for the full derivation.
+
+    **Money** is always an integer number of **cents** (a `BIGINT` in
+    PostgreSQL, an `int64` in Go, a JSON number with no fractional part —
+    never a float). `1000` means 10.00 in the account's currency unit.
+
+    **Authentication**: every endpoint except `POST /auth/register` and
+    `POST /auth/login` requires `Authorization: Bearer <jwt>`, where the JWT
+    is the `token` returned by `POST /auth/login`. `GET /health` is also
+    open.
+
+    **Errors**: every non-2xx response is a JSON object of the shape
+    `{"error": {"code": "...", "message": "..."}}`. `code` is a stable,
+    machine-readable string; `message` is a human-readable, client-safe
+    description. See the `Error` schema for the full description and
+    `docs/WS_EVENTS.md` for the (overlapping) WebSocket error-code table.
+
+    **Gameplay over WebSocket**: starting a room/round and placing bets only
+    happen over `GET /ws` — there is no REST equivalent. See
+    `docs/WS_EVENTS.md` for the full event protocol, or the `/ws` path below
+    for a pointer.
+  contact:
+    name: Cassino (Vertsa Play technical test)
+
+servers:
+  - url: http://localhost:8080
+    description: Local run (docker compose, or `go run ./cmd/api`)
+  - url: http://localhost:8090
+    description: Local run with HTTP_PORT=8090 (workaround when 8080 is taken)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: Account creation and login. The only endpoints open to unauthenticated callers.
+  - name: Wallet
+    description: Deposits, withdrawals and balance. All require authentication.
+  - name: Rooms
+    description: Create, list and close rooms. Starting rounds and betting happen over WebSocket.
+  - name: Realtime
+    description: The WebSocket gameplay channel — see docs/WS_EVENTS.md.
+  - name: Health
+    description: Liveness/readiness probe.
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Create an account
+      description: |
+        Open endpoint (no bearer token). Creates a player with a zero balance.
+        The password is bcrypt-hashed and never echoed back, in the response
+        or anywhere else.
+      security: []
+      operationId: registerPlayer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            examples:
+              default:
+                value:
+                  email: alice@example.com
+                  password: correct-horse-battery-staple
+      responses:
+        '201':
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerAccount'
+              examples:
+                default:
+                  value:
+                    id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                    email: alice@example.com
+                    balance: 0
+                    created_at: "2026-08-19T12:00:00Z"
+        '400':
+          description: |
+            `invalid_request` — malformed JSON body, an invalid e-mail
+            address, or a password shorter than 8 characters.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`email_already_used` — an account with this e-mail already exists.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in and obtain a JWT
+      description: Open endpoint (no bearer token). Exchanges an e-mail/password pair for a bearer token.
+      security: []
+      operationId: loginPlayer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              default:
+                value:
+                  email: alice@example.com
+                  password: correct-horse-battery-staple
+      responses:
+        '200':
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              examples:
+                default:
+                  value:
+                    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                    expires_at: "2026-08-20T12:00:00Z"
+        '400':
+          description: '`invalid_request` — malformed JSON body.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: '`invalid_credentials` — the e-mail/password pair does not match.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /wallet/deposit:
+    post:
+      tags: [Wallet]
+      summary: Deposit funds
+      description: |
+        Credits the caller's balance. Deposits are allowed at any time,
+        including while the caller is seated in an active room.
+      operationId: deposit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AmountRequest'
+            examples:
+              default:
+                value: { amount: 5000 }
+      responses:
+        '200':
+          description: Deposit applied; returns the new balance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BalanceResponse' }
+              examples:
+                default:
+                  value: { balance: 5000 }
+        '400':
+          description: '`invalid_request` — amount is not a positive integer, or the body is malformed.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: '`unauthorized` — missing, malformed or expired bearer token.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /wallet/withdraw:
+    post:
+      tags: [Wallet]
+      summary: Withdraw funds
+      description: |
+        Debits the caller's balance. Blocked with `409 withdrawal_blocked`
+        while the caller is seated in an active (not-yet-closed) room, and
+        capped at the current balance.
+      operationId: withdraw
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AmountRequest'
+            examples:
+              default:
+                value: { amount: 2000 }
+      responses:
+        '200':
+          description: Withdrawal applied; returns the new balance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BalanceResponse' }
+              examples:
+                default:
+                  value: { balance: 3000 }
+        '400':
+          description: '`invalid_request` — amount is not a positive integer, or the body is malformed.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: '`unauthorized` — missing, malformed or expired bearer token.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            Either `insufficient_balance` (the balance cannot cover the
+            amount) or `withdrawal_blocked` (the caller is currently seated
+            in a room that has not closed yet).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                insufficient_balance:
+                  value: { error: { code: insufficient_balance, message: "balance is insufficient for this operation" } }
+                withdrawal_blocked:
+                  value: { error: { code: withdrawal_blocked, message: "withdrawals are blocked while you are in an active room" } }
+
+  /wallet/balance:
+    get:
+      tags: [Wallet]
+      summary: Get current balance
+      description: Also obtainable over WebSocket via the `room.state`/`balance.updated` events while seated in a room.
+      operationId: getBalance
+      responses:
+        '200':
+          description: Current balance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BalanceResponse' }
+              examples:
+                default:
+                  value: { balance: 3000 }
+        '401':
+          description: '`unauthorized` — missing, malformed or expired bearer token.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /rooms:
+    get:
+      tags: [Rooms]
+      summary: List open rooms
+      description: |
+        Rooms currently accepting players (`status = "open"`), newest first.
+        Answered from the Redis cache when possible (`source: "cache"`),
+        falling back to PostgreSQL (`source: "database"`) on a cache miss —
+        PostgreSQL is always the source of truth.
+      operationId: listRooms
+      parameters:
+        - name: limit
+          in: query
+          description: Page size. Defaults to 50, capped at 200. Non-positive or unparsable values are treated as absent.
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          description: Page offset. Defaults to 0. Negative or unparsable values are treated as absent.
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Open rooms.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomListResponse' }
+              examples:
+                default:
+                  value:
+                    rooms:
+                      - id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                        owner_id: 6f9619ff-8b86-d011-b42d-00c04fc964ff
+                        status: open
+                        current_round: 0
+                        max_rounds: 10
+                        player_count: 1
+                        max_players: 6
+                        created_at: "2026-08-19T12:00:00Z"
+                    source: cache
+        '401':
+          description: '`unauthorized` — missing, malformed or expired bearer token.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+    post:
+      tags: [Rooms]
+      summary: Create a room
+      description: |
+        The caller becomes the room's owner and its first seated player. A
+        player may be seated in at most one room at a time, so this also
+        blocks their withdrawals and a second `POST /rooms` or `room.join`
+        until the room closes.
+      operationId: createRoom
+      responses:
+        '201':
+          description: Room created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Room' }
+              examples:
+                default:
+                  value:
+                    id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                    owner_id: 6f9619ff-8b86-d011-b42d-00c04fc964ff
+                    status: open
+                    current_round: 0
+                    max_rounds: 10
+                    player_count: 1
+                    max_players: 6
+                    created_at: "2026-08-19T12:00:00Z"
+        '401':
+          description: '`unauthorized` — missing, malformed or expired bearer token.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`already_in_another_room` — the caller is already seated in a room that has not closed.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /rooms/{id}:
+    delete:
+      tags: [Rooms]
+      summary: Close a room (owner only, graceful)
+      description: |
+        Requests a graceful close. Only the room's owner may call this
+        (`403 not_owner` otherwise). If no round is live, the room closes
+        immediately (`closed: true`). If a round is live, the room moves to
+        `status: "closing"` and the response reports `closed: false`; the
+        round engine finishes and settles that round, and the room actually
+        closes as part of settlement (its members then receive `room.closed`
+        and a final `balance.updated` over WebSocket).
+      operationId: closeRoom
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The room id.
+      responses:
+        '200':
+          description: Close request applied (immediately or pending).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CloseRoomResponse' }
+              examples:
+                closed_immediately:
+                  summary: No live round — closes right away
+                  value: { room_id: 3fa85f64-5717-4562-b3fc-2c963f66afa6, status: closed, closed: true, reason: owner_closed }
+                closing_pending:
+                  summary: A round is live — closes once it settles
+                  value: { room_id: 3fa85f64-5717-4562-b3fc-2c963f66afa6, status: closing, closed: false, reason: owner_closed }
+        '401':
+          description: '`unauthorized` — missing, malformed or expired bearer token.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: '`not_owner` — the caller does not own this room.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: '`room_not_found` — no room with this id exists.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: '`room_closed` — the room is already closed.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /ws:
+    get:
+      tags: [Realtime]
+      summary: WebSocket gameplay channel (protocol documented separately)
+      description: |
+        Upgrades to a WebSocket connection. This is where a room/round is
+        started (`room.start` / `round.start`) and bets are placed
+        (`bet.place`) — there is no REST equivalent for either.
+
+        **Authentication** (checked in this order): the `?token=<jwt>` query
+        parameter (recommended — what Bruno and most WS clients can set), an
+        `Authorization: Bearer <jwt>` header on the handshake, or, for
+        clients that can set neither, an `{"type":"auth","data":{"token":
+        "<jwt>"}}` first frame sent within 10 seconds of connecting. A socket
+        that authenticates none of those ways is closed with a 401 (if the
+        failure is caught before the upgrade) or an `error` event with
+        `code: "unauthorized"` (if caught after).
+
+        Only one connection per player is allowed; a newer login for the same
+        account replaces the older socket, which receives
+        `error{code: "connection_replaced"}` before being closed.
+
+        **Full protocol reference — every event, its exact JSON shape, the
+        error-code table, and worked sequence walkthroughs — is in
+        `docs/WS_EVENTS.md`.** This operation is listed here only so the
+        endpoint appears in the API surface; kin-openapi-style tooling that
+        does not understand the `101 Switching Protocols` upgrade is expected
+        to treat this as documentation rather than a typed request/response
+        pair.
+      operationId: websocketGameplay
+      parameters:
+        - name: token
+          in: query
+          required: false
+          description: JWT access token, as an alternative to the Authorization header or the auth{} first message.
+          schema: { type: string }
+      responses:
+        '101':
+          description: Switching Protocols — the connection is now a WebSocket. See docs/WS_EVENTS.md.
+        '401':
+          description: '`unauthorized` — a token was supplied on the handshake but failed verification.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness / readiness probe
+      description: |
+        Open endpoint (no bearer token, no audit log entry). Probes
+        Postgres and Redis with a 2-second budget each; `200 ok` when both
+        are reachable, `503 degraded` otherwise.
+      security: []
+      operationId: health
+      responses:
+        '200':
+          description: Healthy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+              examples:
+                default:
+                  value:
+                    status: ok
+                    version: dev
+                    time: "2026-08-19T12:00:00Z"
+                    dependencies: { postgres: ok, redis: ok }
+        '503':
+          description: One or more dependencies are unreachable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+              examples:
+                default:
+                  value:
+                    status: degraded
+                    version: dev
+                    time: "2026-08-19T12:00:00Z"
+                    dependencies: { postgres: "error: dial tcp ...", redis: ok }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token returned by `POST /auth/login`. Send as `Authorization Bearer <token>`.
+
+  schemas:
+    Money:
+      type: integer
+      format: int64
+      description: An amount in integer cents. Never a float.
+      example: 1000
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, description: "At least 8 characters." }
+
+    PlayerAccount:
+      type: object
+      required: [id, email, balance, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        balance: { $ref: '#/components/schemas/Money' }
+        created_at: { type: string, format: date-time }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    LoginResponse:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token: { type: string, description: "JWT bearer token." }
+        expires_at: { type: string, format: date-time }
+
+    AmountRequest:
+      type: object
+      required: [amount]
+      additionalProperties: false
+      properties:
+        amount:
+          allOf: [{ $ref: '#/components/schemas/Money' }]
+          description: Must be strictly positive.
+
+    BalanceResponse:
+      type: object
+      required: [balance]
+      properties:
+        balance: { $ref: '#/components/schemas/Money' }
+
+    RoomStatus:
+      type: string
+      enum: [open, closing, closed]
+      description: |
+        open: accepting joins/rounds/bets. closing: a graceful close is
+        pending, finishes when the live round settles. closed: terminal.
+
+    Room:
+      type: object
+      required: [id, owner_id, status, current_round, max_rounds, player_count, max_players, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/RoomStatus' }
+        current_round: { type: integer, description: "Number of the most recently started round (0 before the first)." }
+        max_rounds: { type: integer, example: 10 }
+        player_count: { type: integer }
+        max_players: { type: integer, example: 6 }
+        created_at: { type: string, format: date-time }
+
+    RoomListResponse:
+      type: object
+      required: [rooms, source]
+      properties:
+        rooms:
+          type: array
+          items: { $ref: '#/components/schemas/Room' }
+        source:
+          type: string
+          enum: [cache, database]
+          description: Where this listing was answered from — "cache" (Redis) or "database" (PostgreSQL, the source of truth).
+
+    CloseRoomResponse:
+      type: object
+      required: [room_id, status, closed, reason]
+      properties:
+        room_id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/RoomStatus' }
+        closed:
+          type: boolean
+          description: False when the close is pending — the room had a live round and will close once it settles.
+        reason:
+          type: string
+          example: owner_closed
+
+    HealthResponse:
+      type: object
+      required: [status, time]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        version: { type: string }
+        time: { type: string, format: date-time }
+        dependencies:
+          type: object
+          additionalProperties: { type: string }
+          description: 'Per-dependency status ("ok" or "error: <detail>").'
+
+    Error:
+      type: object
+      required: [error]
+      description: |
+        The envelope for every non-2xx response.
+
+        Error codes used across the REST surface:
+
+        | HTTP | code | meaning |
+        |---|---|---|
+        | 400 | invalid_request | malformed JSON, bad e-mail, weak password, non-positive amount, invalid identifier |
+        | 401 | invalid_credentials | login e-mail/password did not match |
+        | 401 | unauthorized | missing, malformed or expired bearer token |
+        | 403 | not_owner | only the room owner may perform this action |
+        | 403 | not_a_member | caller is not seated in this room |
+        | 404 | not_found | player/round/bet not found |
+        | 404 | room_not_found | no room with this id |
+        | 409 | email_already_used | registration e-mail already taken |
+        | 409 | insufficient_balance | balance cannot cover the withdrawal/bet |
+        | 409 | withdrawal_blocked | caller is seated in an active room |
+        | 409 | already_in_another_room | caller is already seated in a different room |
+        | 409 | already_joined | caller already joined this room |
+        | 409 | room_full | the room's 6 seats are all taken |
+        | 409 | room_closed | the room is already closed |
+        | 409 | room_not_open | the room is closing/closed, not accepting joins/rounds |
+        | 409 | round_in_progress | a round is already live in this room |
+        | 409 | no_active_round | no round is currently accepting bets |
+        | 409 | round_settled | the round already has a result |
+        | 409 | max_rounds_reached | the room already played all 10 rounds |
+        | 409 | no_players | the room has no seated players |
+        | 409 | betting_closed | the 15s betting window has closed |
+        | 409 | duplicate_bet | caller already bet in this round |
+        | 409 | join_in_progress | another join for this room is in flight, retry |
+        | 503 | server_shutting_down | the process is shutting down |
+        | 500 | internal_error | unexpected server error |
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: invalid_request }
+            message: { type: string, example: "amount must be greater than zero" }

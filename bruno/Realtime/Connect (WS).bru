@@ -1,0 +1,37 @@
+meta {
+  name: Connect (WS)
+  type: ws
+  seq: 1
+}
+
+ws {
+  url: {{wsUrl}}/ws?token={{token}}
+}
+
+docs {
+  # Connect (WS)
+
+  Opens the gameplay WebSocket, authenticated via the `?token=` query
+  parameter (Player 1's token by default — duplicate this request and swap
+  in `{{token2}}` for Player 2).
+
+  **Bruno's native WebSocket request support varies by version** (added
+  fairly recently, and the message-sending UI/format has changed across
+  releases) — this request is provided as a best effort for versions that
+  support `type: ws`. If your Bruno version doesn't render a "send frame"
+  box, or the connection just doesn't work, use `scripts/ws_smoke.go`
+  instead (see the top-level README's "WebSocket testing" section) — it
+  exercises the exact same protocol without depending on Bruno's WS support
+  at all.
+
+  Once connected (with either this request or ws_smoke.go), send these
+  frames in order to replay the walkthrough in `docs/WS_EVENTS.md`:
+
+  1. `{"type":"room.join","data":{"room_id":"{{roomId}}"}}`
+  2. (owner only) `{"type":"round.start"}`
+  3. `{"type":"bet.place","data":{"choice":"even","amount":1000}}`
+
+  You should see `room.state`, then `round.started`, then `bet.accepted`,
+  then (after the betting window closes) `round.result` and
+  `balance.updated` arrive unprompted.
+}

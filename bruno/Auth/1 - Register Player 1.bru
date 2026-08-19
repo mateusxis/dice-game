@@ -1,0 +1,43 @@
+meta {
+  name: 1 - Register Player 1
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/auth/register
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "email": "{{email}}",
+    "password": "{{password}}"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 201) {
+    bru.setEnvVar("playerId", res.getBody().id);
+  }
+}
+
+docs {
+  # Register Player 1
+
+  Open endpoint (no bearer token). Creates an account with a zero balance.
+
+  **Expected success**: `201` with `{id, email, balance: 0, created_at}`.
+  Captures the new player's id into the `playerId` environment variable.
+
+  **Expected errors**:
+  - `400 invalid_request` — malformed body, invalid e-mail, or a password
+    shorter than 8 characters.
+  - `409 email_already_used` — run this twice in a row without changing
+    `email` in the environment and you'll hit this on purpose.
+}

@@ -1,0 +1,22 @@
+meta {
+  name: Health
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/health
+  body: none
+  auth: none
+}
+
+docs {
+  # Health
+
+  Open endpoint, no bearer token, not audited. Probes Postgres and Redis
+  with a 2s budget each.
+
+  **Expected**: `200 {"status":"ok",...}` when both dependencies are
+  reachable, `503 {"status":"degraded",...}` otherwise (each dependency's
+  own status is under `dependencies`).
+}

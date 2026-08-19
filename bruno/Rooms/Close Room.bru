@@ -1,0 +1,34 @@
+meta {
+  name: Close Room
+  type: http
+  seq: 3
+}
+
+delete {
+  url: {{baseUrl}}/rooms/{{roomId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+docs {
+  # Close Room
+
+  Owner-only, graceful close. If no round is live, the room closes
+  immediately (`closed: true`); if a round is live, the room moves to
+  `status: "closing"` (`closed: false`) and actually closes once that round
+  settles — see `docs/GAME_RULES.md`.
+
+  **Expected success**: `200` with `{room_id, status, closed, reason}`.
+
+  **Expected errors**:
+  - `401 unauthorized` — missing/invalid/expired bearer token.
+  - `403 not_owner` — the caller (`{{token}}`) does not own `{{roomId}}`.
+    Try swapping in `{{token2}}` to see this on purpose.
+  - `404 room_not_found` — `{{roomId}}` doesn't exist (e.g. it was never
+    set — run "Create Room" first).
+  - `409 room_closed` — the room is already closed.
+}

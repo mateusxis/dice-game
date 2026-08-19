@@ -1,7 +1,8 @@
 // Package rest holds the HTTP delivery layer: the chi router, its middleware
 // stack and the handlers. Phase 2 adds auth (register/login) and wallet
 // (deposit/withdraw/balance) routes, the JWT authenticator and the audit
-// middleware; room and WebSocket routes hang off the same router in Phase 3.
+// middleware; Phase 3 adds the /rooms routes and mounts the WebSocket
+// endpoint on the same router.
 package rest
 
 import (
@@ -50,6 +51,18 @@ type RouterOptions struct {
 	WithdrawUseCase *walletapp.WithdrawUseCase
 	BalanceUseCase  *walletapp.GetBalanceUseCase
 
+	// CreateRoom, ListRooms and CloseRoom back the /rooms routes. CloseRoom is
+	// normally the round engine, so an owner's close waits for the live round
+	// to finish. Leaving any of them nil omits that route.
+	CreateRoom RoomCreator
+	ListRooms  RoomLister
+	CloseRoom  RoomCloser
+
+	// WSHandler serves GET /ws. It is mounted outside the audit middleware on
+	// purpose: a socket lives for minutes and writes one audit entry per event
+	// itself, which a request-scoped middleware could not do.
+	WSHandler http.Handler
+
 	// Tokens verifies bearer tokens for every route except the open ones and
 	// /health.
 	Tokens ports.TokenService
@@ -79,13 +92,16 @@ func NewRouter(opts RouterOptions) *chi.Mux {
 	// Recoverer turns a panic in any handler into a 500 instead of taking the
 	// whole process down with it.
 	r.Use(middleware.Recoverer)
-	if opts.RequestTimeout > 0 {
-		r.Use(middleware.Timeout(opts.RequestTimeout))
-	}
 
 	r.Get("/health", healthHandler(opts))
 
 	r.Group(func(gr chi.Router) {
+		// The request timeout lives here rather than on the root router: a
+		// WebSocket connection is a long-lived hijacked socket, and a
+		// request-scoped deadline has no meaning for it.
+		if opts.RequestTimeout > 0 {
+			gr.Use(middleware.Timeout(opts.RequestTimeout))
+		}
 		gr.Use(AuditMiddleware(opts.AuditRepo, opts.Clock, opts.IDs, opts.Logger))
 
 		gr.Post("/auth/register", RegisterHandler(opts.RegisterUseCase))
@@ -97,8 +113,22 @@ func NewRouter(opts RouterOptions) *chi.Mux {
 			pr.Post("/wallet/deposit", DepositHandler(opts.DepositUseCase))
 			pr.Post("/wallet/withdraw", WithdrawHandler(opts.WithdrawUseCase))
 			pr.Get("/wallet/balance", BalanceHandler(opts.BalanceUseCase))
+
+			if opts.CreateRoom != nil {
+				pr.Post("/rooms", CreateRoomHandler(opts.CreateRoom))
+			}
+			if opts.ListRooms != nil {
+				pr.Get("/rooms", ListRoomsHandler(opts.ListRooms))
+			}
+			if opts.CloseRoom != nil {
+				pr.Delete("/rooms/{id}", CloseRoomHandler(opts.CloseRoom))
+			}
 		})
 	})
+
+	if opts.WSHandler != nil {
+		r.Get("/ws", opts.WSHandler.ServeHTTP)
+	}
 
 	return r
 }
